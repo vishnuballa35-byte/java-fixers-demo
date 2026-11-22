@@ -1,0 +1,9 @@
+public class Hello {
+    public static void main(String[] args) {
+        int age = 20;
+        String name = "Ravi";
+        System.out.println("Hi " + name);
+        if (age > 18) {
+            System.out.println("Adult");
+        }
+    }

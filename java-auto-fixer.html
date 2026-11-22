@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Java Auto Fixer</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #1e1e2e; color: #eee; margin: 0; padding: 20px; }
+  h2 { margin: 0 0 12px 0; }
+  .wrap { position: relative; max-width: 800px; }
+  textarea {
+    width: 100%; height: 380px; box-sizing: border-box;
+    background: #11111b; color: #cdd6f4; border: 1px solid #45475a;
+    border-radius: 8px; padding: 14px; resize: vertical; outline: none;
+    font-family: Consolas, "Courier New", monospace; font-size: 15px; line-height: 1.5;
+  }
+  .dot {
+    position: absolute; top: 12px; right: 12px; width: 16px; height: 16px;
+    border-radius: 50%; cursor: pointer; border: 2px solid #1e1e2e;
+    background: #6c7086; transition: background 0.2s;
+  }
+  .dot.ok { background: #a6e3a1; }
+  .dot.bad { background: #f38ba8; }
+  .dot.off { background: #6c7086; }
+  .panel {
+    display: none; position: absolute; top: 36px; right: 0; width: 360px;
+    background: #181825; border: 1px solid #45475a; border-radius: 10px;
+    padding: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); z-index: 10;
+  }
+  .panel.open { display: block; }
+  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .switch { position: relative; width: 46px; height: 24px; }
+  .switch input { display: none; }
+  .slider { position: absolute; inset: 0; background: #45475a; border-radius: 24px; cursor: pointer; transition: 0.2s; }
+  .slider::before {
+    content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px;
+    background: white; border-radius: 50%; transition: 0.2s;
+  }
+  .switch input:checked + .slider { background: #a6e3a1; }
+  .switch input:checked + .slider::before { transform: translateX(22px); }
+  button {
+    background: #89b4fa; color: #11111b; border: none; border-radius: 6px;
+    padding: 6px 10px; cursor: pointer; font-weight: bold; font-size: 12px; white-space: nowrap;
+  }
+  button:hover { opacity: 0.85; }
+  .wide { width: 100%; padding: 9px; margin-top: 6px; }
+  .status { font-size: 13px; margin: 8px 0; }
+  .errors { max-height: 200px; overflow-y: auto; font-size: 13px; }
+  .err {
+    padding: 8px; border-radius: 6px; background: #11111b; margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .err small { color: #bac2de; }
+  .note { color: #888; font-size: 12px; margin-top: 12px; line-height: 1.4; max-width: 800px; }
+</style>
+</head>
+<body>
+
+<h2>Java Auto Fixer</h2>
+
+<div class="wrap">
+  <textarea id="code" spellcheck="false"></textarea>
+  <div id="dot" class="dot off" title="Click for settings"></div>
+
+  <div id="panel" class="panel">
+    <div class="row">
+      <strong>Error checker</strong>
+      <label class="switch"><input type="checkbox" id="onoff" checked><span class="slider"></span></label>
+    </div>
+    <div class="row">
+      <span>Auto-apply fixes</span>
+      <label class="switch"><input type="checkbox" id="autofix"><span class="slider"></span></label>
+    </div>
+
+    <button id="review" class="wide">Review with Groq AI</button>
+
+    <div id="status" class="status"></div>
+    <div id="errors" class="errors"></div>
+    <button id="applyAll" class="wide">Apply all fixes</button>
+  </div>
+</div>
+
+<div class="note">
+  The checker here catches common mistakes only. For real compiler errors, use the VS Code extension.
+  Don't share this file after adding your key, because anyone with the file can use your Groq account.
+</div>
+
+<script>
+  // ---------- SETTINGS: paste your Groq key once, between the quotes ----------
+  const GROQ_API_KEY = "";
+  const GROQ_MODEL = "openai/gpt-oss-120b";
+
+  // ---------- Common misspellings ----------
+  const TYPOS = {
+    Sytem: "System", Systen: "System", pubilc: "public", pubic: "public",
+    Sting: "String", Strng: "String", retrun: "return", esle: "else",
+    whiel: "while", Itn: "int", vaoid: "void", pritnln: "println", boolen: "boolean"
+  };
+
+  const SYSTEM_PROMPT =
+    'You are a strict Java code reviewer. Find real bugs only: logic mistakes, wrong comparisons, ' +
+    'off-by-one errors, null risks, resource leaks, and wrong method usage. Ignore style and formatting. ' +
+    'Reply with ONLY a JSON object, no markdown, in this exact form: ' +
+    '{"issues":[{"line":<number>,"message":"<short explanation>","fixed_line":"<the corrected full line, or null>"}]}. ' +
+    'Use the line numbers shown in the input. If there are no real problems, reply {"issues":[]}.';
+
+  // ---------- Checker ----------
+  function needsSemicolon(raw) {
+    const t = raw.replace(/\/\/.*$/, "").trim();
+    if (!t) return false;
+    if (/^(\/\*|\*|@)/.test(t)) return false;
+    if (/[;{},:(\[+\-*\/=&|<>]$/.test(t)) return false;
+    if (/^(if|else|for|while|switch|try|catch|finally|do|class|interface|enum)\b/.test(t)) return false;
+    if (/^(package|import)\b/.test(t)) return true;
+    if (/^(return|throw|break|continue)\b/.test(t)) return true;
+    if (/^[A-Za-z_][\w.]*\s*\(.*\)$/.test(t)) return true;
+    if (/^[A-Za-z_][\w.<>\[\]]*\s+[A-Za-z_]\w*\s*=/.test(t)) return true;
+    if (/^[A-Za-z_]\w*(\[\w*\])?\s*=[^=]/.test(t)) return true;
+    return false;
+  }
+
+  function check(code) {
+    const lines = code.split("\n");
+    const errors = [];
+    lines.forEach((ln, i) => {
+      for (const wrong in TYPOS) {
+        if (new RegExp("\\b" + wrong + "\\b").test(ln)) {
+          errors.push({ line: i, msg: `"${wrong}" should be "${TYPOS[wrong]}"`, type: "typo", wrong, right: TYPOS[wrong] });
+        }
+      }
+      if (needsSemicolon(ln)) errors.push({ line: i, msg: "Missing semicolon ;", type: "semi" });
+    });
+
+    let depth = 0, extraLine = -1;
+    lines.forEach((ln, i) => {
+      const clean = ln.replace(/"(\\.|[^"\\])*"/g, '""').replace(/\/\/.*$/, "");
+      for (const ch of clean) {
+        if (ch === "{") depth++;
+        if (ch === "}") { depth--; if (depth < 0 && extraLine < 0) extraLine = i; }
+      }
+    });
+    if (depth > 0) errors.push({ line: lines.length - 1, msg: `Missing ${depth} closing brace }`, type: "brace", n: depth });
+    if (extraLine >= 0) errors.push({ line: extraLine, msg: "Extra closing brace }", type: "extra" });
+    return errors;
+  }
+
+  function applyErrors(code, errors) {
+    const lines = code.split("\n");
+    for (const err of errors) {
+      if (err.type === "typo") {
+        lines[err.line] = lines[err.line].replace(new RegExp("\\b" + err.wrong + "\\b", "g"), err.right);
+      } else if (err.type === "semi") {
+        const idx = lines[err.line].indexOf("//");
+        lines[err.line] = idx >= 0
+          ? lines[err.line].slice(0, idx).trimEnd() + "; " + lines[err.line].slice(idx)
+          : lines[err.line].trimEnd() + ";";
+      } else if (err.type === "brace") {
+        for (let k = 0; k < err.n; k++) lines.push("}");
+      }
+    }
+    return lines.join("\n");
+  }
+
+  // ---------- Page wiring ----------
+  const codeBox = document.getElementById("code");
+  const dot = document.getElementById("dot");
+  const panel = document.getElementById("panel");
+  const onoff = document.getElementById("onoff");
+  const autofix = document.getElementById("autofix");
+  const statusEl = document.getElementById("status");
+  const errorsEl = document.getElementById("errors");
+  const applyAllBtn = document.getElementById("applyAll");
+
+  let aiIssues = [];
+  let timer = null;
+
+  codeBox.value =
+`import java.util.Scanner
+
+public class Hello {
+    public static void main(String[] args) {
+        int age = 20
+        Sting name = "Ravi";
+        System.out.println("Hi " + name)
+        if (age > 18) {
+            Sytem.out.println("Adult");
+        }
+        retrun;
+    }`;
+
+  function runCheck() {
+    if (!onoff.checked) {
+      dot.className = "dot off";
+      statusEl.textContent = "Checker is OFF.";
+      errorsEl.innerHTML = "";
+      return;
+    }
+    let errors = check(codeBox.value);
+    let fixedCount = 0;
+    if (autofix.checked) {
+      for (let round = 0; round < 5; round++) {
+        const fixable = errors.filter(e => e.type !== "extra");
+        if (fixable.length === 0) break;
+        fixedCount += fixable.length;
+        codeBox.value = applyErrors(codeBox.value, fixable);
+        errors = check(codeBox.value);
+      }
+    }
+    render(errors);
+    if (fixedCount > 0) statusEl.textContent = `Auto-fixed ${fixedCount} error(s).`;
+  }
+
+  function render(errors) {
+    const all = [...errors, ...aiIssues];
+    dot.className = all.length === 0 ? "dot ok" : "dot bad";
+    if (!statusEl.dataset.ai) statusEl.textContent = all.length === 0 ? "No errors found." : `${all.length} problem(s) found.`;
+    statusEl.dataset.ai = "";
+
+    errorsEl.innerHTML = "";
+    all.forEach(err => {
+      const row = document.createElement("div");
+      row.className = "err";
+      const text = document.createElement("span");
+      text.innerHTML = `<small>Line ${err.line + 1}:</small> ${err.msg}`;
+      row.appendChild(text);
+
+      const btn = document.createElement("button");
+      if (err.type === "ai") {
+        if (err.fixLine !== null) {
+          btn.textContent = "Apply fix";
+          btn.onclick = () => {
+            const lines = codeBox.value.split("\n");
+            lines[err.line] = err.fixLine;
+            codeBox.value = lines.join("\n");
+            aiIssues = aiIssues.filter(x => x !== err);
+            runCheck();
+          };
+          row.appendChild(btn);
+        }
+      } else if (err.type !== "extra") {
+        btn.textContent = "Apply fix";
+        btn.onclick = () => { codeBox.value = applyErrors(codeBox.value, [err]); runCheck(); };
+        row.appendChild(btn);
+      }
+      errorsEl.appendChild(row);
+    });
+    applyAllBtn.style.display = errors.some(e => e.type !== "extra") ? "block" : "none";
+  }
+
+  async function reviewWithGroq() {
+    const key = GROQ_API_KEY.trim();
+    if (!key || key === "PASTE_YOUR_KEY_HERE") {
+      statusEl.textContent = "Add your key at GROQ_API_KEY in the code.";
+      return;
+    }
+    statusEl.textContent = "Groq is reviewing...";
+    statusEl.dataset.ai = "1";
+
+    const lines = codeBox.value.split("\n");
+    const numbered = lines.map((l, i) => `${i + 1}| ${l}`).join("\n");
+    const body = {
+      model: GROQ_MODEL,
+      temperature: 0,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: numbered }
+      ]
+    };
+
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error("Groq returned " + res.status);
+      const data = await res.json();
+      const text = data.choices[0].message.content;
+      const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
+
+      aiIssues = (parsed.issues || [])
+        .map(i => ({
+          line: Number(i.line) - 1,
+          msg: "AI: " + i.message,
+          type: "ai",
+          fixLine: typeof i.fixed_line === "string" ? i.fixed_line : null
+        }))
+        .filter(i => i.line >= 0 && i.line < lines.length);
+
+      statusEl.textContent = `Groq found ${aiIssues.length} possible issue(s).`;
+      render(check(codeBox.value));
+    } catch (err) {
+      statusEl.dataset.ai = "";
+      statusEl.textContent = "Review failed: " + err.message + " (the browser may block this request; the VS Code version always works)";
+    }
+  }
+
+  applyAllBtn.onclick = () => {
+    codeBox.value = applyErrors(codeBox.value, check(codeBox.value).filter(e => e.type !== "extra"));
+    runCheck();
+  };
+  document.getElementById("review").onclick = reviewWithGroq;
+  dot.onclick = () => panel.classList.toggle("open");
+  onoff.onchange = runCheck;
+  autofix.onchange = runCheck;
+
+  codeBox.addEventListener("input", () => {
+    aiIssues = [];
+    clearTimeout(timer);
+    timer = setTimeout(runCheck, 400);
+  });
+
+  codeBox.addEventListener("keydown", e => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const s = codeBox.selectionStart;
+      codeBox.value = codeBox.value.slice(0, s) + "    " + codeBox.value.slice(codeBox.selectionEnd);
+      codeBox.selectionStart = codeBox.selectionEnd = s + 4;
+    }
+  });
+
+  runCheck();
+</script>
+</body>
+</html>

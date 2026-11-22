@@ -1,0 +1,82 @@
+{
+  "name": "java-auto-fixer",
+  "displayName": "Java Auto Fixer",
+  "description": "Grammarly-style Java checking: javac errors, Groq AI review, quick fixes and auto-fix on save",
+  "version": "0.2.0",
+  "publisher": "student",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:java"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "javaAutoFixer.toggle",
+        "title": "Java Auto Fixer: Turn On/Off"
+      },
+      {
+        "command": "javaAutoFixer.fixAll",
+        "title": "Java Auto Fixer: Fix All Errors"
+      },
+      {
+        "command": "javaAutoFixer.aiReview",
+        "title": "Java Auto Fixer: Review with Groq AI"
+      },
+      {
+        "command": "javaAutoFixer.setGroqKey",
+        "title": "Java Auto Fixer: Set Groq API Key"
+      }
+    ],
+    "configuration": {
+      "title": "Java Auto Fixer",
+      "properties": {
+        "javaAutoFixer.javacPath": {
+          "type": "string",
+          "default": "javac",
+          "description": "Path to the Java compiler (javac). Leave as 'javac' if it works in your terminal."
+        },
+        "javaAutoFixer.autoFixOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically fix simple errors (missing semicolons and braces) when you save."
+        },
+        "javaAutoFixer.groqModel": {
+          "type": "string",
+          "default": "openai/gpt-oss-120b",
+          "description": "Groq model used for AI review. See console.groq.com for available models."
+        },
+        "javaAutoFixer.aiOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run a Groq AI review every time you save (uses your Groq quota)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vishnuballa35-byte/java-fixers.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/vishnuballa35-byte/java-fixers/issues"
+  },
+  "homepage": "https://github.com/vishnuballa35-byte/java-fixers#readme",
+  "dependencies": {
+    "dotenv": "^18.0.10",
+    "express": "^5.3.0"
+  }
+}
