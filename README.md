@@ -24,7 +24,7 @@ A browser-based Java code checker that finds common beginner mistakes, fixes the
 
 ### Using the AI Review
 
-1. Get a free API key from https://console.groq.com/keys.
+1. Get a free API key from groq ai
 2. Paste the key into the **Groq API key** box above the editor. The key is used only in your browser and is not saved.
 3. Click **Review with Groq AI** in the settings panel.
 
@@ -57,7 +57,7 @@ java-fixers-demo/
 
 ## Author
 
-Vishnu Balla, B.E. Computer Science Engineering (AI & ML), NGIT/KMEC.
+Vishnu Balla, B.E. Computer Science Engineering (AI & ML), KMEC.
 
 ## License
 
